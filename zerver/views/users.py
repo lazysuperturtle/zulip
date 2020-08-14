@@ -19,6 +19,7 @@ from zerver.lib.actions import (
     do_change_user_role,
     do_create_user,
     do_deactivate_user,
+    do_delete_user,
     do_reactivate_user,
     do_regenerate_api_key,
     do_update_bot_config_data,
@@ -113,6 +114,15 @@ def deactivate_bot_backend(request: HttpRequest, user_profile: UserProfile,
 def _deactivate_user_profile_backend(request: HttpRequest, user_profile: UserProfile,
                                      target: UserProfile) -> HttpResponse:
     do_deactivate_user(target, acting_user=user_profile)
+    return json_success()
+
+def delete_user_backend(request: HttpRequest, user_profile: UserProfile, 
+                        user_id: int) -> HttpResponse:
+    target = acces_user_by_id(user_profile, user_id)
+    if target.is_realm_owner and not user_profile.is_realm_owner:
+        raise OrganizationOwnerRequired()
+    if check_last_owner(target):
+        return json_error(_('Cannot delete the only organization owner'))
     return json_success()
 
 def reactivate_user_backend(request: HttpRequest, user_profile: UserProfile,
