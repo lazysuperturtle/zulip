@@ -910,6 +910,43 @@ def do_deactivate_user(user_profile: UserProfile,
         for profile in bot_profiles:
             do_deactivate_user(profile, acting_user=acting_user, _cascade=False)
 
+def do_delete_user(user_profile: UserProfile,
+                       acting_user: Optional[UserProfile]=None,
+                       _cascade: bool=True) -> None: pass
+    delete_user_sessions(user_profile)
+    clear_scheduled_emails([user_profile.id])
+
+    event_time = timezone_now()
+    RealmAuditLog.objects.create(
+        realm=user_profile.realm, modified_user=user_profile, acting_user=acting_user,
+        event_type=RealmAuditLog.USER_DELETED, event_time=event_time,
+        extra_data=ujson.dumps({
+            RealmAuditLog.ROLE_COUNT: realm_user_count_by_role(user_profile.realm),
+        }))
+    do_increment_logging_stat(user_profile.realm, COUNT_STATS['active_users_log:is_bot:day'],
+                              user_profile.is_bot, event_time, increment=-1)
+    if settings.BILLING_ENABLED:
+        update_license_ledger_if_needed(user_profile.realm, event_time)
+
+    event = dict(type="realm_user", op="remove",
+                 person=dict(user_id=user_profile.id,
+                             full_name=user_profile.full_name))
+    send_event(user_profile.realm, event, active_user_ids(user_profile.realm_id))
+    
+    user_profile.delete()
+
+    if user_profile.is_bot:
+        event = dict(type="realm_bot", op="remove",
+                     bot=dict(user_id=user_profile.id,
+                              full_name=user_profile.full_name))
+        send_event(user_profile.realm, event, bot_owner_user_ids(user_profile))
+
+    if _cascade:
+        bot_profiles = UserProfile.objects.filter(is_bot=True, is_active=True,
+                                                  bot_owner=user_profile)
+        for profile in bot_profiles:
+            do_delete_user(profile, acting_user=acting_user, _cascade=False)
+
 def do_deactivate_stream(stream: Stream, log: bool=True, acting_user: Optional[UserProfile]=None) -> None:
 
     # Get the affected user ids *before* we deactivate everybody.
